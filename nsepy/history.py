@@ -388,38 +388,40 @@ def getEnhancedBhavcopy(tickerid, start, end):
     init = start.month
     done = False
     
-    while(cy <= endyear):
-        y,m = cy,None
-        for c in range(init,13):
-            m=c
-            e1 = list(get_expiry_date(year=cy, month=c,index=False, stock=True, vix=False))[0]
-            if c+1>12:
-                m = (c+1)%12
-                y = cy + 1
-            else:
-                m = m + 1
-            e2 = list(get_expiry_date(year=y, month=m,index=False, stock=True, vix=False))[0]
-            if c+2>12:
-                m = (c+2)%12
-                y = cy + 1
-            else:
-                m = m + 1
-            e3 = list(get_expiry_date(year=y, month=m,index=False, stock=True, vix=False))[0]
+    try:
+        while(cy <= endyear):
+            y,m = cy,None
+            for c in range(init,13):
+                m=c
+                e1 = list(get_expiry_date(year=cy, month=c,index=False, stock=True, vix=False))[0]
+                if c+1>12:
+                    m = (c+1)%12
+                    y = cy + 1
+                else:
+                    m = m + 1
+                e2 = list(get_expiry_date(year=y, month=m,index=False, stock=True, vix=False))[0]
+                if c+2>12:
+                    m = (c+2)%12
+                    y = cy + 1
+                else:
+                    m = m + 1
+                e3 = list(get_expiry_date(year=y, month=m,index=False, stock=True, vix=False))[0]
 
-            #print(f'Start - {start}, End - {e1}, E1 - {e1}, E2 - {e2}, E3 - {e3}')
-            other = fetch_derivative_data(tickerid,start, e1, e1, e2, e3)
-            historical_oi = pd.concat([historical_oi,other],axis=0)
+                #print(f'Start - {start}, End - {e1}, E1 - {e1}, E2 - {e2}, E3 - {e3}')
+                other = fetch_derivative_data(tickerid,start, e1, e1, e2, e3)
+                historical_oi = pd.concat([historical_oi,other],axis=0)
 
-            if cy==endyear and c==1:
-                done=True 
-                break
-            # Calculating next start
-            start = e1+timedelta(days=1)
-        cy = cy+1
-        init = 1
-        if done==True:break
-    
-        
+                if cy==endyear and c==1:
+                    done=True 
+                    break
+                # Calculating next start
+                start = e1+timedelta(days=1)
+            cy = cy+1
+            init = 1
+            if done==True:break
+    except:
+        pass
+
     return historical_oi
 
 
