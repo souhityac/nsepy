@@ -6,6 +6,7 @@ Created on Tue Nov 24 21:25:54 2015
 """
 
 from nsepy.urls import *
+from nsepy.derivatives import get_expiry_date
 import six
 from nsepy.commons import *
 from nsepy.constants import *
@@ -312,10 +313,14 @@ def get_index_pe_history_quanta(symbol, start, end):
 
 
 def get_price_list(dt, series='EQ'):
+    
+    # Downloads cash market bhavcopy
+    
     MMM = dt.strftime("%b").upper()
     yyyy = dt.strftime("%Y")
 
     """
+    Date format for the url:
     1. YYYY
     2. MMM
     3. ddMMMyyyy
@@ -324,8 +329,98 @@ def get_price_list(dt, series='EQ'):
     txt = unzip_str(res.content)
     fp = six.StringIO(txt)
     df = pd.read_csv(fp)
-    del df['Unnamed: 13']
+    df = df.drop([df.columns[-1]], axis=1)
     return df[df['SERIES'] == series]
+ 
+        
+def get_participant_wise_oi(dt):
+    
+    """
+    1. dt (datetime.date)
+    """
+    res = daily_fno_participant_wise_oi_url(dt.strftime("%d%m%Y"))
+    
+    if res.status_code == 404:
+        print("Failed to fetch data. Check date. ")
+        return None
+    else:
+        df = pd.read_csv(io.StringIO(res.content.decode('utf-8')))
+        df.columns = df.iloc[0,:]
+        df = df.drop(index=[0,5],axis=0)
+        df = df.reset_index(drop=True,inplace=False)
+        return df
+    
+
+def fetch_derivative_data(tickerid, start_date, end_date, expiry_1, expiry_2, expiry_3):
+    
+    # Stock futures (Similarly for index futures, set index = True)
+    fut_data = get_history(symbol=tickerid,start=start_date,end=end_date,futures=True,expiry_date=expiry_1)
+    month2 = get_history(symbol=tickerid,start=start_date,end=end_date,futures=True,expiry_date=expiry_2)
+    month3 = get_history(symbol=tickerid,start=start_date,end=end_date,futures=True,expiry_date=expiry_3)
+
+    fut_data = fut_data[['Symbol','Open Interest']]
+    fut_data['Month 2 OI'] = month2['Open Interest']
+    fut_data['Month 3 OI'] = month3['Open Interest']
+    fut_data['Cum. Open Interest'] = fut_data['Open Interest'] + fut_data['Month 2 OI'] + fut_data['Month 3 OI']
+    fut_data = fut_data[['Symbol','Cum. Open Interest']]
+    
+    # Cash market data
+    cash_data = get_history(symbol=tickerid,start=start_date,end=end_date)
+    cash_data = cash_data[['Open','High','Low','Close','VWAP','%Deliverble']]
+    
+    data = pd.concat([fut_data, cash_data], axis=1)
+    
+    data['Change in OI'] = [data['Cum. Open Interest'][i] - data['Cum. Open Interest'][i-1] if i>0 else None for i in range(len(data))]
+    data['% OI Change'] = [data['Change in OI'][i]/data['Cum. Open Interest'][i-1] if i>0 else None for i in range(len(data))]
+    data['%Price Change'] = [(data['Close'][i] - data['Close'][i-1])/data['Close'][i-1] if i>0 else None for i in range(len(data))]
+    data['%Dev from VWAP'] = [(data['Close'][i] - data['VWAP'][i])/data['VWAP'][i] for i in range(len(data))]
+    
+    return data
+    
+def getEnhancedBhavcopy(tickerid, start, end):
+    
+    headers = ['Symbol', 'Cum. Open Interest', 'Open', 'High', 'Low', 'Close', 'VWAP',
+       '%Deliverble', 'Change in OI', '% OI Change', '%Price Change',
+       '%Dev from VWAP']
+    cy,endyear = start.year,end.year
+    historical_oi = pd.DataFrame(columns=headers)
+
+    init = start.month
+    done = False
+    
+    while(cy <= endyear):
+        y,m = cy,None
+        for c in range(init,13):
+            m=c
+            e1 = list(get_expiry_date(year=cy, month=c,index=False, stock=True, vix=False))[0]
+            if c+1>12:
+                m = (c+1)%12
+                y = cy + 1
+            else:
+                m = m + 1
+            e2 = list(get_expiry_date(year=y, month=m,index=False, stock=True, vix=False))[0]
+            if c+2>12:
+                m = (c+2)%12
+                y = cy + 1
+            else:
+                m = m + 1
+            e3 = list(get_expiry_date(year=y, month=m,index=False, stock=True, vix=False))[0]
+
+            #print(f'Start - {start}, End - {e1}, E1 - {e1}, E2 - {e2}, E3 - {e3}')
+            other = fetch_derivative_data(tickerid,start, e1, e1, e2, e3)
+            historical_oi = pd.concat([historical_oi,other],axis=0)
+
+            if cy==endyear and c==1:
+                done=True 
+                break
+            # Calculating next start
+            start = e1+timedelta(days=1)
+        cy = cy+1
+        init = 1
+        if done==True:break
+    
+        
+    return historical_oi
 
 
 """
